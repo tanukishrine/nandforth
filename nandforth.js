@@ -21,7 +21,6 @@ function run(instr) {
   while (ptr[0]++ < instr.length - 1) {
     if (is_primitive(instr)) continue;
     if (is_macro(instr)) continue;
-    if (is_literal(instr)) continue;
     error(`>>>${instr[ptr[0]]}<<< Not a word.`); return;
   };
   ptr.shift();
@@ -30,26 +29,6 @@ function run(instr) {
 function error(message) {
   [ptr, stk, rtn, adr, mem] = [[], [], [], [], []];
   console.log(message);
-};
-
-function is_literal(instr) {
-  const token = instr[ptr[0]];
-  if (token[0] !== "0") return false;
-  let num; const val = token.slice(2, token.length);
-  switch (["b", "d", "x"].indexOf(token[1])) {
-    case 0: num = parseInt(val, 2); break;
-    case 1: num = parseInt(val, 10); break;
-    case 2: num = parseInt(val, 16); break;
-    default: return false;
-  };
-  if (Number.isNaN(num)) return false;
-  stk.push(...num
-    .toString(2)
-    .padStart(val.length, 0)
-    .split("")
-    .map(str => +str)
-  );
-  return true;
 };
 
 function is_primitive(instr) {
@@ -68,6 +47,10 @@ function is_macro(instr) {
   return true;
 }
 
+const stk_lt = (val, fn) => (stk.length < val) ? error("Data stack underflow.")    : fn();
+const rtn_lt = (val, fn) => (rtn.length < val) ? error("Return stack underflow.")  : fn();
+const adr_lt = (val, fn) => (adr.length < val) ? error("Address stack underflow.") : fn();
+
 const macro = [];
 const list = [{
     name: "0",
@@ -77,28 +60,28 @@ const list = [{
     exec: () => stk.push(1)
   }, {
     name: "nand",
-    exec: () => stk.push((stk.pop() + stk.pop() > 1) ? 0 : 1)
+    exec: () => stk_lt(2, () => stk.push((stk.pop() + stk.pop() > 1) ? 0 : 1))
   }, {
     name: "drop",
-    exec: () => stk.pop()
+    exec: () => stk_lt(1, () => stk.pop())
   }, {
     name: "dup",
-    exec: () => stk.push(stk.at(-1))
+    exec: () => stk_lt(1, () => stk.push(stk.at(-1)))
   }, {
     name: "over",
-    exec: () => stk.push(stk.at(-2))
+    exec: () => stk_lt(2, () => stk.push(stk.at(-2)))
   }, {
     name: ">r",
-    exec: () => rtn.push(stk.pop())
+    exec: () => stk_lt(1, () => rtn.push(stk.pop()))
   }, {
     name: "r>",
-    exec: () => stk.push(rtn.pop())
+    exec: () => rtn_lt(1, () => stk.push(rtn.pop()))
   }, {
     name: ">a",
-    exec: () => adr.push(stk.pop())
+    exec: () => stk_lt(1, () => adr.push(stk.pop()))
   }, {
     name: "a>",
-    exec: () => stk.push(adr.pop())
+    exec: () => adr_lt(1, () => stk.push(adr.pop()))
   }, {
     name: "!",
     exec: () => {
@@ -113,11 +96,12 @@ const list = [{
     exec: () => {
       const addr = adr.join("");
       const i = mem.findIndex(obj => obj.addr === addr);
-      if (i >= 0) stk.push(mem[i].val);
+      if (i > -1) stk.push(mem[i].val);
     }
   }, {
     name: "if",
     exec: (instr) => {
+      stk_lt(1, () => {});
       if (stk.pop() === 1) return;
       while (ptr[0]++ < instr.length - 1) {
         if (instr[ptr[0]] === "else") break;
@@ -192,7 +176,7 @@ const list = [{
       );
     }
   }, {
-    name: ".",
+    name: ".", // print stacks
     exec: print
   }, {
     name: ".b", // print binary format
